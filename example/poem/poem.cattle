@@ -11,6 +11,10 @@ from cattle.facility.file import InstallFile, MakeDir, Chmod, Chown
 POEMS_DIR = "/var/poems"
 POEM_FILE = os.path.join(POEMS_DIR, "poem.txt")
 
+deps = [
+    "poem.txt",
+]
+
 steps = [
     MakeDir(POEMS_DIR),
     InstallFile("poem.txt", dest=POEM_FILE),
