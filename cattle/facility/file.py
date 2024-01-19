@@ -47,7 +47,7 @@ class MakeDir(Facility):
         os.makedirs(self.path, exist_ok=True)
 
     def dry_run(self):
-        return [f"make directory {self.path} (mode={self.mode}, owner={self.owner}, group={self.group})"]
+        return [f"make directory {self.path}"]
 
 class InstallFile(Facility):
     def __init__(self, sourcefile, dest):

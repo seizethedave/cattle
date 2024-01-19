@@ -11,13 +11,17 @@ from cattle.facility.file import InstallFile, MakeDir, Chmod, Chown
 POEMS_DIR = "/var/poems"
 POEM_FILE = os.path.join(POEMS_DIR, "poem.txt")
 
+def cfg_relative(path):
+    "Returns an absolute path for a path relative to this config."
+    return os.path.join(os.path.dirname(__file__), path)
+
 deps = [
     "poem.txt",
 ]
 
 steps = [
     MakeDir(POEMS_DIR),
-    InstallFile("poem.txt", dest=POEM_FILE),
+    InstallFile(cfg_relative("poem.txt"), dest=POEM_FILE),
     Chmod(POEM_FILE, mode=0o666),
     Chown(POEM_FILE, owner_name="root"),
 ]
