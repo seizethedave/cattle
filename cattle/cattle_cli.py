@@ -3,10 +3,16 @@ import getpass
 import importlib
 import os
 import sys
+import tarfile
+import tempfile
 import time
+import zipapp
+
+import paramiko
+import scp
 
 from cattle import cattle
-from cattle import cattle_remote
+from cattle.runtime import cattle_remote
 
 parser = argparse.ArgumentParser(
     prog="cattle",
@@ -24,6 +30,51 @@ parser_exec.add_argument("-u", "--username", action="store")
 parser_exec.add_argument("-d", "--dry-run",
                         help="if set, prints the hypothetical rather than running anything",
                         action="store_true")
+
+
+def make_archive(execution_id, cfg_dir):
+    def add_filter(item: tarfile.TarInfo):
+        return item if "__pycache__" not in item.name else None
+    with tempfile.NamedTemporaryFile(prefix="cattle_cfg_", delete=False) as t:
+        with tarfile.open(mode="w:gz", fileobj=t) as tar:
+            tar.add(cfg_dir, arcname="config", recursive=True, filter=add_filter)
+            return t.name
+
+def make_executable():
+    exclude = {
+        "cattle.py",
+        "cattle_cli.py",
+    }
+    def exec_filter(path):
+        return path not in exclude
+
+    with tempfile.NamedTemporaryFile(prefix="cattle_runtime_", delete=False) as t:
+        zipapp.create_archive(
+            os.path.dirname(__file__),
+            target=t,
+            main="cattle.runtime.cattle_remote:main",
+            filter=exec_filter,
+        )
+        return t.name
+
+class HostRunner:
+    def __init__(self, execution_id, archive, host, port, username, password):
+        self.execution_id = execution_id
+        self.archive = archive
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+
+    def transfer(self):
+        dest_dir = f"/var/run/cattle/{self.execution_id}"
+        with paramiko.SSHClient() as ssh_client:
+            ssh_client.load_system_host_keys()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(self.host, self.port, self.username, self.password)
+            ssh_client.exec_command(f"mkdir -p {dest_dir}")
+            with scp.SCPClient(ssh_client.get_transport()) as scp_client:
+                scp_client.put(self.archive, dest_dir)
 
 def main() -> int:
     args = parser.parse_args()
@@ -54,17 +105,17 @@ def main() -> int:
         return 1
 
     # Otherwise, we're in remote mode.
-    execution_id = "cattle_exec_{}".format(time.monotonic())
-    print(execution_id)
 
-    archive = cattle.make_archive(execution_id, args.config_dir)
-    print(archive)
+    execution_id = "cattle_exec_{}".format(time.monotonic())
+    archive = make_archive(execution_id, args.config_dir)
+    password = getpass.getpass("Please enter the password for these hosts: ")
+    executable = make_executable()
+    print(executable)
+
     runners = []
 
-    password = getpass.getpass("Please enter the password for these hosts: ")
-
     for h in args.hosts:
-        runner = cattle.HostRunner(execution_id, archive, h, args.port, args.username, password)
+        runner = HostRunner(execution_id, archive, h, args.port, args.username, password)
         runner.transfer()
         runners.append(runner)
 
