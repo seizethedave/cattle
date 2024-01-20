@@ -58,5 +58,7 @@ def main() -> int:
                             help="if set, prints the hypothetical rather than running anything",
                             action="store_true")
 
+    args = parser.parse_args()
+
 if __name__ == "__main__":
     sys.exit(main())

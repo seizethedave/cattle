@@ -11,8 +11,7 @@ import zipapp
 import paramiko
 import scp
 
-from cattle import cattle
-from cattle.runtime import cattle_remote
+from cattle import cattle_remote
 
 parser = argparse.ArgumentParser(
     prog="cattle",
@@ -41,19 +40,13 @@ def make_archive(execution_id, cfg_dir):
             return t.name
 
 def make_executable():
-    exclude = {
-        "cattle.py",
-        "cattle_cli.py",
-    }
-    def exec_filter(path):
-        return path not in exclude
-
     with tempfile.NamedTemporaryFile(prefix="cattle_runtime_", delete=False) as t:
         zipapp.create_archive(
             os.path.dirname(__file__),
             target=t,
-            main="cattle.runtime.cattle_remote:main",
-            filter=exec_filter,
+            main="cattle_remote:main",
+            # Leave out the orchestrator bits.
+            filter=lambda p: p != "cattle_cli.py",
         )
         return t.name
 
