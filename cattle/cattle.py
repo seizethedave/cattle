@@ -1,30 +1,8 @@
-import scp
 import tarfile
 import tempfile
 
 import paramiko
-
-def createSSHClient(server, port, user, password):
-    client = paramiko.SSHClient()
-    client.load_system_host_keys()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(server, port, user, password)
-    return client
-
-def run_config(cfg, dry_run):
-    steps = getattr(cfg, 'steps', None)
-
-    if steps is None:
-        raise Exception("The config file doesn't define a steps attribute.")
-
-    if dry_run:
-        for step in steps:
-            print(f"> {step.__class__.__name__}:")
-            for c in step.dry_run():
-                print(f"   > {c}")
-    else:
-        for step in steps:
-            step.run()
+import scp
 
 def make_archive(execution_id, cfg_dir):
     def add_filter(item: tarfile.TarInfo):
@@ -35,16 +13,20 @@ def make_archive(execution_id, cfg_dir):
             return t.name
 
 class HostRunner:
-    def __init__(self, execution_id, archive, host, username, password):
+    def __init__(self, execution_id, archive, host, port, username, password):
         self.execution_id = execution_id
         self.archive = archive
         self.host = host
+        self.port = port
         self.username = username
         self.password = password
 
     def transfer(self):
         dest_dir = f"/var/run/cattle/{self.execution_id}"
-        ssh = createSSHClient(self.host, 22, self.username, self.password)
-        ssh.exec_command(f"mkdir -p {dest_dir}")
-        with scp.SCPClient(ssh.get_transport()) as scp_client:
-            scp_client.put(self.archive, dest_dir)
+        with paramiko.SSHClient() as ssh_client:
+            ssh_client.load_system_host_keys()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(self.host, self.port, self.username, self.password)
+            ssh_client.exec_command(f"mkdir -p {dest_dir}")
+            with scp.SCPClient(ssh_client.get_transport()) as scp_client:
+                scp_client.put(self.archive, dest_dir)

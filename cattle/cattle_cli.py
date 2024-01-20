@@ -6,6 +6,7 @@ import sys
 import time
 
 from cattle import cattle
+from cattle import cattle_remote
 
 parser = argparse.ArgumentParser(
     prog="cattle",
@@ -17,6 +18,7 @@ parser_exec.add_argument("config_dir")
 parser_exec.add_argument("-m", "--config-module", default="cattle",
                         help="name of the config module. defaults to cattle.")
 parser_exec.add_argument("-ho", "--host", dest="hosts", action="append")
+parser_exec.add_argument("-p", "--port", default=22)
 parser_exec.add_argument("-l", "--local", action="store_true")
 parser_exec.add_argument("-u", "--username", action="store")
 parser_exec.add_argument("-d", "--dry-run",
@@ -38,7 +40,10 @@ def main() -> int:
         return 1
 
     if args.local:
-        cattle.run_config(config_module, args.dry_run)
+        if args.dry_run:
+            cattle_remote.dry_run_config(config_module)
+        else:
+            cattle_remote.run_config(config_module)
         return 0
 
     if not args.hosts:
@@ -59,7 +64,7 @@ def main() -> int:
     password = getpass.getpass("Please enter the password for these hosts: ")
 
     for h in args.hosts:
-        runner = cattle.HostRunner(execution_id, archive, h, args.username, password)
+        runner = cattle.HostRunner(execution_id, archive, h, args.port, args.username, password)
         runner.transfer()
         runners.append(runner)
 
