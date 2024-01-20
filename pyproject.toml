@@ -8,6 +8,8 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.8"
+paramiko = "^3.4.0"
+scp = "^0.14.5"
 
 [tool.poetry.scripts]
 cattle = "cattle.cattle_cli:main"

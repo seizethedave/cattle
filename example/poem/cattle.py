@@ -15,10 +15,6 @@ def cfg_relative(path):
     "Returns an absolute path for a path relative to this config."
     return os.path.join(os.path.dirname(__file__), path)
 
-deps = [
-    "poem.txt",
-]
-
 steps = [
     MakeDir(POEMS_DIR),
     InstallFile(cfg_relative("poem.txt"), dest=POEM_FILE),
