@@ -30,3 +30,27 @@ host. Each configured host should be driving those steps to completion, and a
 Cattle orchestrator can ask later about each host's completion status.
 
 So we'll *plan locally, drive remotely*.
+
+
+## Remote execution
+
+Someone calls `cattle exec somewhere/myconfig --host 10.10.10.10`. What has to happen?
+
+* We create an execution ID.
+* Create an archive of things the remote host will need:
+    * The folder containing the given config.
+    * Enough Python code to run that config. This will probably include the cattle stdlib and a runnable script.
+    * A hash of the above.
+* Transfer that archive to (each) remote host.
+* Remotely:
+    * Expand the archive to a well-known place, organized by execution ID.
+    * Validate the archive against the hash.
+    * Run it.
+* After some time:
+    * An operator can interrogate each host's status by issuing a status command given the execution ID, which can be used to reach out to each host and peer into the execution folder ...
+
+
+
+
+## Privileges
+
