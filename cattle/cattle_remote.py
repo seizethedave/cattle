@@ -104,7 +104,7 @@ def exec_config(args):
     # customer configs to refer to facilities via "import cattle.facility.foo"
     # but we no longer have a top-level cattle package due to us zipapping the
     # cattle folder contents. So we're going to kind of rewrite imports for
-    # facility.* to cattle.facility.*.
+    # cattle.facility.* to facility.*.
 
     import facility
     assert "facility" in sys.modules
