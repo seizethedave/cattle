@@ -118,18 +118,17 @@ def exec_config(args):
         import shutil
         shutil.copy(archive, "/Users/dgrant/dev/remote-test/")
         shutil.copy(executable, "/Users/dgrant/dev/remote-test/")
+        return
 
-    """
     password = (
         os.getenv("SSH_SPECIAL_PASS")
         or getpass.getpass("Please enter the password for these hosts: ")
     )
-    
+
     runners = []
 
     for h in args.hosts:
         runner = HostRunner(execution_id, archive, h, args.port, args.username, password)
         runner.transfer()
         runners.append(runner)
-    """
     return 0
