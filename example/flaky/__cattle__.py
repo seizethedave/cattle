@@ -1,7 +1,6 @@
 """
 A flaky config that requires retries to eventually finish.
 """
-
 from cattle.facility.facility import Facility
 
 class FlakyAction(Facility):
@@ -18,9 +17,8 @@ class FlakyAction(Facility):
     def run(self):
         if self.remaining_attempts > 0:
             self.remaining_attempts -= 1
-
         if self.remaining_attempts > 0:
-            raise Exception("not working yet")
+            raise Exception("spurious failure in FlakyAction")
 
     def dry_run(self):
         return [f"flaky action (attempts={self.total_attempts})"]

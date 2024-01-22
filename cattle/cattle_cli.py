@@ -2,6 +2,7 @@ import argparse
 import getpass
 import importlib
 import os
+import pathlib
 import sys
 import tarfile
 import tempfile
@@ -11,25 +12,7 @@ import zipapp
 import paramiko
 import scp
 
-from cattle import cattle_remote
-
-parser = argparse.ArgumentParser(
-    prog="cattle",
-    description="cattle: the server configurer.",
-)
-subparsers = parser.add_subparsers()
-parser_exec = subparsers.add_parser("exec")
-parser_exec.add_argument("config_dir")
-parser_exec.add_argument("-m", "--config-module", default="cattle",
-                        help="name of the config module. defaults to cattle.")
-parser_exec.add_argument("-ho", "--host", dest="hosts", action="append")
-parser_exec.add_argument("-p", "--port", default=22)
-parser_exec.add_argument("-l", "--local", action="store_true")
-parser_exec.add_argument("-u", "--username", action="store")
-parser_exec.add_argument("-d", "--dry-run",
-                        help="if set, prints the hypothetical rather than running anything",
-                        action="store_true")
-
+from . import cattle_remote
 
 def make_archive(execution_id, cfg_dir):
     def add_filter(item: tarfile.TarInfo):
@@ -40,13 +23,14 @@ def make_archive(execution_id, cfg_dir):
             return t.name
 
 def make_executable():
+    this_file = pathlib.Path(__file__)
     with tempfile.NamedTemporaryFile(prefix="cattle_runtime_", delete=False) as t:
         zipapp.create_archive(
-            os.path.dirname(__file__),
+            this_file.absolute().parent,
             target=t,
             main="cattle_remote:main",
-            # Leave out the orchestrator bits.
-            filter=lambda p: p != "cattle_cli.py",
+            # Leave out this script.
+            filter=lambda p: p != this_file.name,
         )
         return t.name
 
@@ -70,12 +54,35 @@ class HostRunner:
                 scp_client.put(self.archive, dest_dir)
 
 def main() -> int:
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        prog="cattle",
+        description="cattle: the server configurer.",
+    )
+    subparsers = parser.add_subparsers()
+    parser_exec = subparsers.add_parser("exec")
+    parser_exec.set_defaults(func=exec_config)
+    parser_exec.add_argument("config_dir")
+    parser_exec.add_argument("-m", "--config-module", default="__cattle__",
+                            help="name of the config module. defaults to __cattle__.")
+    parser_exec.add_argument("-ho", "--host", dest="hosts", action="append")
+    parser_exec.add_argument("-p", "--port", default=22)
+    parser_exec.add_argument("-l", "--local", action="store_true")
+    parser_exec.add_argument("-u", "--username", action="store")
+    parser_exec.add_argument("-v", "--verbose", action="store_true")
+    parser_exec.add_argument("-d", "--dry-run",
+                            help="if set, prints the hypothetical rather than running anything",
+                            action="store_true")
 
+    args = parser.parse_args()
+    return args.func(args)
+
+def exec_config(args):
     config_dir_with_module = os.path.join(args.config_dir, args.config_module)
     mod = config_dir_with_module.replace("/", ".")
     if mod.endswith(".py"):
         mod = mod[:-3]
+
+    sys.path.append(os.path.dirname(__file__))
 
     try:
         config_module = importlib.import_module(mod)
@@ -101,15 +108,28 @@ def main() -> int:
 
     execution_id = "cattle_exec_{}".format(time.monotonic())
     archive = make_archive(execution_id, args.config_dir)
-    password = getpass.getpass("Please enter the password for these hosts: ")
     executable = make_executable()
-    print(executable)
 
+    if args.verbose:
+        print("archive:", archive)
+        print("executable:", executable)
+
+        # For my testing:
+        import shutil
+        shutil.copy(archive, "/Users/dgrant/dev/remote-test/")
+        shutil.copy(executable, "/Users/dgrant/dev/remote-test/")
+
+    """
+    password = (
+        os.getenv("SSH_SPECIAL_PASS")
+        or getpass.getpass("Please enter the password for these hosts: ")
+    )
+    
     runners = []
 
     for h in args.hosts:
         runner = HostRunner(execution_id, archive, h, args.port, args.username, password)
         runner.transfer()
         runners.append(runner)
-
+    """
     return 0
