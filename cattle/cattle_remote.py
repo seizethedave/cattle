@@ -23,9 +23,9 @@ def call_with_retry(c: Callable[[], NoReturn]):
         raise Exception(f"unable to execute after {RETRIES} attempts. last err: {e}")
 
 def dry_run_config(cfg):
-    steps = getattr(cfg, 'steps', None)
-
-    if steps is None:
+    try:
+        steps = cfg.steps
+    except AttributeError:
         raise Exception("The config file doesn't define a steps attribute.")
 
     for step in steps:
@@ -34,9 +34,9 @@ def dry_run_config(cfg):
             print(f"   > {c}")
 
 def run_config(cfg):
-    steps = getattr(cfg, 'steps', None)
-
-    if steps is None:
+    try:
+        steps = cfg.steps
+    except AttributeError:
         raise Exception("The config file doesn't define a steps attribute.")
 
     for i, step in enumerate(steps, start=1):
@@ -50,7 +50,7 @@ def main() -> int:
         prog="cattle-run",
         description="runner program for __cattle: the server configurer__.",
     )
-    subparsers = parser.add_subparsers(required=True)
+    subparsers = parser.add_subparsers()
     parser_init = subparsers.add_parser(
         "init",
         help="initializes a remote Cattle runtime environment given a tar file",
@@ -93,7 +93,10 @@ def exec_config(args):
 
     # Make the config/__cattle__.py importable:
     sys.path.append(os.path.dirname(config_abs))
-    pathlib.Path(os.path.join(config_abs, "__init__.py")).touch()
+    try:
+        pathlib.Path(os.path.join(config_abs, "__init__.py")).touch()
+    except FileNotFoundError:
+        pass
 
     config_pkg = os.path.basename(config_dir)
     mod = f"{config_pkg}.{args.config_module}"

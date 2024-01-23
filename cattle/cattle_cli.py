@@ -35,23 +35,36 @@ def make_executable():
         return t.name
 
 class HostRunner:
-    def __init__(self, execution_id, archive, host, port, username, password):
+    def __init__(self, execution_id, archive, executable, host, port, username, password):
         self.execution_id = execution_id
         self.archive = archive
+        self.executable = executable
         self.host = host
         self.port = port
         self.username = username
         self.password = password
 
+    def connect(self):
+        c = paramiko.SSHClient()
+        c.load_system_host_keys()
+        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        c.connect(self.host, self.port, self.username, self.password)
+        self.ssh_client = c
+
     def transfer(self):
         dest_dir = f"/var/run/cattle/{self.execution_id}"
-        with paramiko.SSHClient() as ssh_client:
-            ssh_client.load_system_host_keys()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh_client.connect(self.host, self.port, self.username, self.password)
-            ssh_client.exec_command(f"mkdir -p {dest_dir}")
-            with scp.SCPClient(ssh_client.get_transport()) as scp_client:
-                scp_client.put(self.archive, dest_dir)
+        self.ssh_client.exec_command(f"mkdir -p {dest_dir}")
+        with scp.SCPClient(self.ssh_client.get_transport()) as scp_client:
+            scp_client.put(self.archive, dest_dir)
+            scp_client.put(self.executable, dest_dir)
+
+    def execute(self, dry_run: bool):
+        dest_dir = f"/var/run/cattle/{self.execution_id}"
+        archive_filename = os.path.basename(self.archive)
+        executable_filename = os.path.basename(self.executable)
+        self.ssh_client.exec_command(f"cd {dest_dir} && python3 {executable_filename} init {archive_filename}")
+        config_filename = os.path.join(dest_dir, "config")
+        self.ssh_client.exec_command(f"cd {dest_dir} && python3 {executable_filename} exec {config_filename}")
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -105,6 +118,8 @@ def exec_config(args):
         return 1
 
     # Otherwise, we're in remote mode.
+    # Package up the customer configs and a zipapp package and transfer these to
+    # the remote hosts.
 
     execution_id = "cattle_exec_{}".format(time.monotonic())
     archive = make_archive(execution_id, args.config_dir)
@@ -128,7 +143,10 @@ def exec_config(args):
     runners = []
 
     for h in args.hosts:
-        runner = HostRunner(execution_id, archive, h, args.port, args.username, password)
-        runner.transfer()
+        runner = HostRunner(execution_id, archive, executable, h, args.port, args.username, password)
         runners.append(runner)
+        runner.connect()
+        runner.transfer()
+        runner.execute(args.dry_run)
+
     return 0
