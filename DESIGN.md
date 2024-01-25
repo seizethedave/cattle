@@ -50,6 +50,10 @@ Someone calls `cattle exec somewhere/myconfig --host 10.10.10.10`. What has to h
     * An operator can interrogate each host's status by issuing a status command given the execution ID, which can be used to reach out to each host and peer into the execution folder ...
     * But the cattle process on that remote host may or may not be running. It needs to do some form of lazily spinning up a host that synchronizes and provides access to the data files in there.
 
-
 ## Privileges
 
+For simplicity, for now, we're not going to implement any privilege escalation.
+If you're running these locally, you can do this yourself with `sudo cattle exec
+example/poem --local`. If you're running them remotely, the `--username`
+specified for the remote hosts needs to have enough permissions to perform the
+actions specified in your Cattle config.
