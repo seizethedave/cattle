@@ -14,7 +14,7 @@ import scp
 
 from . import cattle_remote
 
-def make_archive(execution_id, cfg_dir):
+def make_archive(cfg_dir):
     def add_filter(item: tarfile.TarInfo):
         return item if "__pycache__" not in item.name else None
     with tempfile.NamedTemporaryFile(prefix="cattle_cfg_", delete=False) as t:
@@ -62,9 +62,12 @@ class HostRunner:
         dest_dir = f"/var/run/cattle/{self.execution_id}"
         archive_filename = os.path.basename(self.archive)
         executable_filename = os.path.basename(self.executable)
-        self.ssh_client.exec_command(f"cd {dest_dir} && python3 {executable_filename} init {archive_filename}")
         config_filename = os.path.join(dest_dir, "config")
-        self.ssh_client.exec_command(f"cd {dest_dir} && python3 {executable_filename} exec {config_filename}")
+        self.ssh_client.exec_command(
+            f"cd {dest_dir} && "
+            f"python3 {executable_filename} init {archive_filename} && "
+            f"python3 {executable_filename} exec {config_filename}"
+        )
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -97,6 +100,10 @@ def exec_config(args):
 
     sys.path.append(os.path.dirname(__file__))
 
+    # Put the parent dir of $config_dir in the import path.
+    config_dir_parent = os.path.dirname(os.path.abspath(args.config_dir))
+    sys.path.append(config_dir_parent)
+
     try:
         config_module = importlib.import_module(mod)
     except ModuleNotFoundError as e:
@@ -122,18 +129,12 @@ def exec_config(args):
     # the remote hosts.
 
     execution_id = "cattle_exec_{}".format(time.monotonic())
-    archive = make_archive(execution_id, args.config_dir)
+    archive = make_archive(args.config_dir)
     executable = make_executable()
 
     if args.verbose:
         print("archive:", archive)
         print("executable:", executable)
-
-        # For my testing:
-        import shutil
-        shutil.copy(archive, "/Users/dgrant/dev/remote-test/")
-        shutil.copy(executable, "/Users/dgrant/dev/remote-test/")
-        return
 
     password = (
         os.getenv("SSH_SPECIAL_PASS")
