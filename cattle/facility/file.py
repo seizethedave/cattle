@@ -60,6 +60,8 @@ class InstallFile(Facility):
         self.destpath = dest
 
     def should_run(self):
+        # InstallFile should run only if there isn't an identical file already
+        # at the destination path.
         filecmp.clear_cache()
         try:
             return not filecmp.cmp(self.sourcepath, self.destpath, shallow=False)
@@ -71,3 +73,21 @@ class InstallFile(Facility):
 
     def dry_run(self) -> str:
         return [f"install file {self.destpath}"]
+
+class Symlink(Facility):
+    def __init__(self, source, dest):
+        super(Facility).__init__()
+        self.source = source
+        self.dest = dest
+
+    def should_run(self):
+        return True
+
+    def run(self):
+        try:
+            os.symlink(self.source, self.dest)
+        except FileExistsError:
+            pass
+
+    def dry_run(self) -> str:
+        return [f"symlink {self.source} -> {self.dest}"]
