@@ -91,3 +91,20 @@ class Symlink(Facility):
 
     def dry_run(self) -> str:
         return [f"symlink {self.source} -> {self.dest}"]
+
+class Unlink(Facility):
+    def __init__(self, path):
+        super(Facility).__init__()
+        self.path = path
+
+    def should_run(self):
+        return True
+
+    def run(self):
+        try:
+            os.unlink(self.path)
+        except FileNotFoundError:
+            pass
+
+    def dry_run(self) -> str:
+        return [f"unlink {self.path}"]
