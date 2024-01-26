@@ -93,19 +93,21 @@ def main() -> int:
     return args.func(args)
 
 def exec_config(args):
-    config_dir_with_module = os.path.join(args.config_dir, args.config_module)
-    mod = config_dir_with_module.replace("/", ".")
-    if mod.endswith(".py"):
-        mod = mod[:-3]
+    config_abs = os.path.abspath(args.config_dir.rstrip("/"))
+    config_package = os.path.basename(config_abs)
 
     sys.path.append(os.path.dirname(__file__))
 
     # Put the parent dir of $config_dir in the import path.
-    config_dir_parent = os.path.dirname(os.path.abspath(args.config_dir))
+    config_dir_parent = os.path.dirname(config_abs)
     sys.path.append(config_dir_parent)
 
+    importable_module = f"{config_package}.{args.config_module}"
+    if importable_module.endswith(".py"):
+        importable_module = importable_module[:-3]
+
     try:
-        config_module = importlib.import_module(mod)
+        config_module = importlib.import_module(importable_module)
     except ModuleNotFoundError as e:
         print(f"couldn't load config: {e}", file=sys.stderr)
         return 1
@@ -129,7 +131,7 @@ def exec_config(args):
     # the remote hosts.
 
     execution_id = "cattle_exec_{}".format(time.monotonic())
-    archive = make_archive(args.config_dir)
+    archive = make_archive(config_abs)
     executable = make_executable()
 
     if args.verbose:
