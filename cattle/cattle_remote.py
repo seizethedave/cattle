@@ -106,7 +106,6 @@ def init(args):
 def rewrite_status(status_file: str, status: str):
     with open(status_file, 'w') as f:
         f.write(status)
-        os.fsync(f)
 
 def exec_config(args):
     config_dir = args.config_dir.rstrip("/")
