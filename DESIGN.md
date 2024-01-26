@@ -48,7 +48,17 @@ Someone calls `cattle exec somewhere/myconfig --host 10.10.10.10`. What has to h
     * Run it.
 * After some time:
     * An operator can interrogate each host's status by issuing a status command given the execution ID, which can be used to reach out to each host and peer into the execution folder ...
-    * But the cattle process on that remote host may or may not be running. It needs to do some form of lazily spinning up a host that synchronizes and provides access to the data files in there.
+    * We want a simple file-based protocol the orchestrator can use to understand
+        the status of the execution, whether done, in-progress, or errored.
+        Something not terribly prone to races.
+    * We want each remote execution to have a local log that the operator can examine to understand
+        what went wrong.
+* Then, to clean up:
+    * An operator can issue a cleanup command given an execution ID. This will go out to each host and clean the
+        cattle state folder for that execution. This is optional - failure to do this will only eat up a small amount
+        of drive space.
+    * I think this should only succeeed if the execution isn't currently in progress.
+
 
 ## Privileges
 

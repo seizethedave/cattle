@@ -4,13 +4,18 @@ Command line and tools for running Cattle configs.
 
 import argparse
 import importlib
-import pathlib
+import logging
 import os
+import pathlib
 import sys
 import tarfile
 from typing import Callable, NoReturn
 
 RETRIES = 3
+
+STATUS_PROGRESS = "PROGRESS"
+STATUS_ERROR = "ERROR"
+STATUS_DONE = "DONE"
 
 def call_with_retry(c: Callable[[], NoReturn]):
     e = None
@@ -23,27 +28,39 @@ def call_with_retry(c: Callable[[], NoReturn]):
         raise Exception(f"unable to execute after {RETRIES} attempts. last err: {e}")
 
 def dry_run_config(cfg):
+    logging.info("running in dry run mode")
+
     try:
         steps = cfg.steps
     except AttributeError:
-        raise Exception("The config file doesn't define a steps attribute.")
+        logging.exception("The config file doesn't define a steps attribute.")
+        raise
 
     for step in steps:
-        print(f"> {step.__class__.__name__}:")
+        logging.info(f"> {step.__class__.__name__}:")
         for c in step.dry_run():
-            print(f"   > {c}")
+            logging.info(f"   > {c}")
 
 def run_config(cfg):
+    logging.info("running in real mode")
+
     try:
         steps = cfg.steps
     except AttributeError:
-        raise Exception("The config file doesn't define a steps attribute.")
+        logging.exception("The config file doesn't define a steps attribute.")
+        raise
 
     for i, step in enumerate(steps, start=1):
         try:
+            logging.info(f"Running step {i} ({step.__class__.__name__})")
             call_with_retry(step.run)
         except Exception as e:
-            raise Exception(f"aborting config at step {i} ({step.__class__.__name__}): {e}")
+            logging.exception(f"aborting config at step {i} ({step.__class__.__name__})")
+            raise
+        else:
+            logging.info(f"Step {i} completed successfully.")
+    else:
+        logging.info("config executed successfully.")
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -82,16 +99,21 @@ def init(args):
     The remote init routine.
     This takes a tar file and initializes the runtime directory structure.
     """
-
     with tarfile.open(args.tar_file) as t:
         t.extractall()
     return 0
 
+def rewrite_status(status_file: str, status: str):
+    with open(status_file, 'w') as f:
+        f.write(status)
+        os.fsync(f)
+
 def exec_config(args):
     config_dir = args.config_dir.rstrip("/")
     config_abs = os.path.abspath(config_dir)
+    exec_dir = os.path.dirname(config_abs)
 
-    # Make the config/__cattle__.py importable:
+    # Make config/__cattle__.py importable:
     sys.path.append(os.path.dirname(config_abs))
     try:
         pathlib.Path(os.path.join(config_abs, "__init__.py")).touch()
@@ -119,10 +141,23 @@ def exec_config(args):
         print(f"couldn't load config: {e}", file=sys.stderr)
         return 1
 
-    if args.dry_run:
-        dry_run_config(config_module)
+    log_file = os.path.join(exec_dir, "exec.log")
+    status_file = os.path.join(exec_dir, "STATUS")
+
+    logging.basicConfig(filename=log_file, level=logging.INFO)
+
+    rewrite_status(status_file, STATUS_PROGRESS)
+
+    try:
+        if args.dry_run:
+            dry_run_config(config_module)
+        else:
+            run_config(config_module)
+    except:
+        # An unrecoverable error after performing retries.
+        rewrite_status(status_file, STATUS_ERROR)
     else:
-        run_config(config_module)
+        rewrite_status(status_file, STATUS_DONE)
 
     return 0
 
