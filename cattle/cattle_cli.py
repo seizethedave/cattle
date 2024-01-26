@@ -58,16 +58,30 @@ class HostRunner:
             scp_client.put(self.archive, dest_dir)
             scp_client.put(self.executable, dest_dir)
 
-    def execute(self, dry_run: bool):
+    def execute(self):
         dest_dir = f"/var/run/cattle/{self.execution_id}"
         archive_filename = os.path.basename(self.archive)
         executable_filename = os.path.basename(self.executable)
         config_filename = os.path.join(dest_dir, "config")
-        self.ssh_client.exec_command(
+        _, cmd_out, cmd_err = self.ssh_client.exec_command(
             f"cd {dest_dir} && "
             f"python3 {executable_filename} init {archive_filename} && "
             f"python3 {executable_filename} exec {config_filename}"
         )
+        exit_code = cmd_out.channel.recv_exit_status()
+        if exit_code != 0:
+            raise Exception(
+                f"Execute failed with code {exit_code}: "
+                f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
+            )
+
+    def status(self):
+        exec_status = f"/var/run/cattle/{self.execution_id}/STATUS"
+        _, cat_out, _ = self.ssh_client.exec_command(
+            f"cat {exec_status} || echo 'UNKNOWN'"
+        )
+        return cat_out.read().decode()
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -150,6 +164,7 @@ def exec_config(args):
         runners.append(runner)
         runner.connect()
         runner.transfer()
-        runner.execute(args.dry_run)
+        runner.execute()
+        print(f"Host {h} finished with status '{runner.status()}'.")
 
     return 0
