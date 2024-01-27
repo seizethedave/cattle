@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import getpass
 import importlib
 import os
@@ -91,6 +92,13 @@ class HostRunner:
                 f"Clean failed with code {exit_code}: "
                 f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
             )
+
+def map_runners(fn, runners):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_map = {executor.submit(fn, r): r for r in runners}
+        for future in concurrent.futures.as_completed(future_map):
+            runner = future_map[future]
+            future.result()
 
 def main() -> int:
     hostinfo_parser = argparse.ArgumentParser(add_help=False)
@@ -196,13 +204,14 @@ def run_exec_config(args):
         print("archive:", archive)
         print("executable:", executable)
 
-    for runner in runners:
+    def transfer_and_exec(runner):
         runner.connect()
         runner.transfer(archive, executable)
         runner.execute(archive, executable)
         print(f"Host {runner.host} finished with status '{runner.status()}'.")
-    else:
-        print("Completed execution ID", execution_id)
+
+    map_runners(transfer_and_exec, runners)
+    print("Completed execution ID", execution_id)
 
     return 0
 
@@ -213,9 +222,11 @@ def run_status(args):
         print(e.msg, file=sys.stderr)
         return 1
 
-    for runner in runners:
+    def status(runner):
         runner.connect()
         print(f"Host {runner.host} status = {runner.status()}")
+
+    map_runners(status, runners)
 
     return 0
 
@@ -226,11 +237,12 @@ def run_clean(args):
         print(e.msg, file=sys.stderr)
         return 1
 
-    for runner in runners:
+    def clean(runner):
         runner.connect()
         runner.clean()
         print(f"Host {runner.host} cleaned.")
-    else:
-        print(f"Cleaned execution from {len(runners)} hosts.")
+
+    map_runners(clean, runners)
+    print(f"Cleaned execution from {len(runners)} hosts.")
 
     return 0
