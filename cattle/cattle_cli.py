@@ -35,10 +35,9 @@ def make_executable():
         return t.name
 
 class HostRunner:
-    def __init__(self, execution_id, archive, executable, host, port, username, password):
+    def __init__(self, execution_id, host, port, username, password):
         self.execution_id = execution_id
-        self.archive = archive
-        self.executable = executable
+        self.exec_dir = f"/var/run/cattle/{self.execution_id}"
         self.host = host
         self.port = port
         self.username = username
@@ -51,20 +50,18 @@ class HostRunner:
         c.connect(self.host, self.port, self.username, self.password)
         self.ssh_client = c
 
-    def transfer(self):
-        dest_dir = f"/var/run/cattle/{self.execution_id}"
-        self.ssh_client.exec_command(f"mkdir -p {dest_dir}")
+    def transfer(self, archive, executable):
+        self.ssh_client.exec_command(f"mkdir -p {self.exec_dir}")
         with scp.SCPClient(self.ssh_client.get_transport()) as scp_client:
-            scp_client.put(self.archive, dest_dir)
-            scp_client.put(self.executable, dest_dir)
+            scp_client.put(archive, self.exec_dir)
+            scp_client.put(executable, self.exec_dir)
 
-    def execute(self):
-        dest_dir = f"/var/run/cattle/{self.execution_id}"
-        archive_filename = os.path.basename(self.archive)
-        executable_filename = os.path.basename(self.executable)
-        config_filename = os.path.join(dest_dir, "config")
+    def execute(self, archive, executable):
+        archive_filename = os.path.basename(archive)
+        executable_filename = os.path.basename(executable)
+        config_filename = os.path.join(self.exec_dir, "config")
         _, cmd_out, cmd_err = self.ssh_client.exec_command(
-            f"cd {dest_dir} && "
+            f"cd {self.exec_dir} && "
             f"python3 {executable_filename} init {archive_filename} && "
             f"python3 {executable_filename} exec {config_filename}"
         )
@@ -76,37 +73,67 @@ class HostRunner:
             )
 
     def status(self):
-        exec_status = f"/var/run/cattle/{self.execution_id}/STATUS"
+        exec_status = os.path.join(self.exec_dir, "STATUS")
         _, cat_out, _ = self.ssh_client.exec_command(
             f"cat {exec_status} || echo 'UNKNOWN'"
         )
         return cat_out.read().decode()
 
+    def clean(self):
+        _, cmd_out, cmd_err = self.ssh_client.exec_command(f"rm -rf {self.exec_dir}")
+        exit_code = cmd_out.channel.recv_exit_status()
+        if exit_code != 0:
+            raise Exception(
+                f"Clean failed with code {exit_code}: "
+                f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
+            )
 
 def main() -> int:
+    hostinfo_parser = argparse.ArgumentParser(add_help=False)
+    hostinfo_parser.add_argument("-ho", "--host", dest="hosts", action="append")
+    hostinfo_parser.add_argument("-p", "--port", type=int, default=22)
+    hostinfo_parser.add_argument("-u", "--username", action="store")
+
     parser = argparse.ArgumentParser(
         prog="cattle",
         description="cattle: the server configurer.",
     )
     subparsers = parser.add_subparsers()
-    parser_exec = subparsers.add_parser("exec")
-    parser_exec.set_defaults(func=exec_config)
+    parser_exec = subparsers.add_parser(
+        "exec",
+        help="Execute a Cattle config against remote hosts.",
+        parents=[hostinfo_parser],
+    )
+    parser_exec.set_defaults(func=run_exec_config)
     parser_exec.add_argument("config_dir")
     parser_exec.add_argument("-m", "--config-module", default="__cattle__",
                             help="name of the config module. defaults to __cattle__.")
-    parser_exec.add_argument("-ho", "--host", dest="hosts", action="append")
-    parser_exec.add_argument("-p", "--port", default=22)
     parser_exec.add_argument("-l", "--local", action="store_true")
-    parser_exec.add_argument("-u", "--username", action="store")
     parser_exec.add_argument("-v", "--verbose", action="store_true")
     parser_exec.add_argument("-d", "--dry-run",
                             help="if set, prints the hypothetical rather than running anything",
                             action="store_true")
 
+    parser_status = subparsers.add_parser(
+        "status",
+        help="Enquire about the remote status of an execution.",
+        parents=[hostinfo_parser],
+    )
+    parser_status.set_defaults(func=run_status)
+    parser_status.add_argument("execution_id")
+
+    parser_clean = subparsers.add_parser(
+        "clean",
+        help="Clean remote resources associated with an execution.",
+        parents=[hostinfo_parser],
+    )
+    parser_clean.set_defaults(func=run_clean)
+    parser_clean.add_argument("execution_id")
+
     args = parser.parse_args()
     return args.func(args)
 
-def exec_config(args):
+def run_exec_config(args):
     config_abs = os.path.abspath(args.config_dir.rstrip("/"))
     config_package = os.path.basename(config_abs)
 
@@ -144,9 +171,11 @@ def exec_config(args):
     # Package up the customer configs and a zipapp package and transfer these to
     # the remote hosts.
 
-    execution_id = "cattle_exec_{}".format(time.monotonic())
+    execution_id = f"cattle.{time.monotonic()}"
     archive = make_archive(config_abs)
     executable = make_executable()
+
+    print("Running execution ID:", execution_id)
 
     if args.verbose:
         print("archive:", archive)
@@ -160,11 +189,62 @@ def exec_config(args):
     runners = []
 
     for h in args.hosts:
-        runner = HostRunner(execution_id, archive, executable, h, args.port, args.username, password)
+        runner = HostRunner(execution_id, h, args.port, args.username, password)
         runners.append(runner)
         runner.connect()
-        runner.transfer()
-        runner.execute()
+        runner.transfer(archive, executable)
+        runner.execute(archive, executable)
         print(f"Host {h} finished with status '{runner.status()}'.")
+    else:
+        print("Completed execution ID", execution_id)
+
+    return 0
+
+def run_status(args):
+    if not args.hosts:
+        print("require at least one host when run in remote mode.", file=sys.stderr)
+        return 1
+    if not args.username:
+        print("username required in remote mode.", file=sys.stderr)
+        return 1
+
+    password = (
+        os.getenv("SSH_SPECIAL_PASS")
+        or getpass.getpass("Please enter the password for these hosts: ")
+    )
+
+    runners = []
+
+    for h in args.hosts:
+        runner = HostRunner(args.execution_id, h, args.port, args.username, password)
+        runners.append(runner)
+        runner.connect()
+        print(f"Host {h} status = {runner.status()}")
+
+    return 0
+
+def run_clean(args):
+    if not args.hosts:
+        print("require at least one host when run in remote mode.", file=sys.stderr)
+        return 1
+    if not args.username:
+        print("username required in remote mode.", file=sys.stderr)
+        return 1
+
+    password = (
+        os.getenv("SSH_SPECIAL_PASS")
+        or getpass.getpass("Please enter the password for these hosts: ")
+    )
+
+    runners = []
+
+    for h in args.hosts:
+        runner = HostRunner(args.execution_id, h, args.port, args.username, password)
+        runners.append(runner)
+        runner.connect()
+        runner.clean()
+        print(f"Host {h} cleaned.")
+    else:
+        print(f"Cleaned execution from {len(runners)} hosts.")
 
     return 0
