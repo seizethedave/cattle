@@ -35,6 +35,10 @@ def make_executable():
         return t.name
 
 class HostRunner:
+    """
+    HostRunner handles all remote host communication: transferring files, running
+    the remote cattle module, peeking at statuses, etc.
+    """
     def __init__(self, execution_id, host, port, username, password):
         self.execution_id = execution_id
         self.exec_dir = f"/var/run/cattle/{self.execution_id}"
@@ -77,7 +81,7 @@ class HostRunner:
         _, cat_out, _ = self.ssh_client.exec_command(
             f"cat {exec_status} || echo 'UNKNOWN'"
         )
-        return cat_out.read().decode()
+        return cat_out.read().decode().strip()
 
     def clean(self):
         _, cmd_out, cmd_err = self.ssh_client.exec_command(f"rm -rf {self.exec_dir}")
@@ -133,6 +137,19 @@ def main() -> int:
     args = parser.parse_args()
     return args.func(args)
 
+def runners_from_args(args, execution_id):
+    if not args.hosts:
+        raise Exception("require at least one host when run in remote mode.")
+    if not args.username:
+        raise Exception("username required in remote mode.")
+
+    password = (
+        os.getenv("SSH_SPECIAL_PASS")
+        or getpass.getpass("Please enter the password for these hosts: ")
+    )
+
+    return [HostRunner(execution_id, h, args.port, args.username, password) for h in args.hosts]
+
 def run_exec_config(args):
     config_abs = os.path.abspath(args.config_dir.rstrip("/"))
     config_package = os.path.basename(config_abs)
@@ -160,90 +177,59 @@ def run_exec_config(args):
             cattle_remote.run_config(config_module)
         return 0
 
-    if not args.hosts:
-        print("require at least one host when run in remote mode.", file=sys.stderr)
-        return 1
-    if not args.username:
-        print("username required in remote mode.", file=sys.stderr)
-        return 1
-
     # Otherwise, we're in remote mode.
     # Package up the customer configs and a zipapp package and transfer these to
     # the remote hosts.
 
     execution_id = f"cattle.{time.monotonic()}"
-    archive = make_archive(config_abs)
-    executable = make_executable()
-
     print("Running execution ID:", execution_id)
 
+    try:
+        runners = runners_from_args(args, execution_id)
+    except Exception as e:
+        print(e.msg, file=sys.stderr)
+        return 1
+
+    archive = make_archive(config_abs)
+    executable = make_executable()
     if args.verbose:
         print("archive:", archive)
         print("executable:", executable)
 
-    password = (
-        os.getenv("SSH_SPECIAL_PASS")
-        or getpass.getpass("Please enter the password for these hosts: ")
-    )
-
-    runners = []
-
-    for h in args.hosts:
-        runner = HostRunner(execution_id, h, args.port, args.username, password)
-        runners.append(runner)
+    for runner in runners:
         runner.connect()
         runner.transfer(archive, executable)
         runner.execute(archive, executable)
-        print(f"Host {h} finished with status '{runner.status()}'.")
+        print(f"Host {runner.host} finished with status '{runner.status()}'.")
     else:
         print("Completed execution ID", execution_id)
 
     return 0
 
 def run_status(args):
-    if not args.hosts:
-        print("require at least one host when run in remote mode.", file=sys.stderr)
+    try:
+        runners = runners_from_args(args, args.execution_id)
+    except Exception as e:
+        print(e.msg, file=sys.stderr)
         return 1
-    if not args.username:
-        print("username required in remote mode.", file=sys.stderr)
-        return 1
 
-    password = (
-        os.getenv("SSH_SPECIAL_PASS")
-        or getpass.getpass("Please enter the password for these hosts: ")
-    )
-
-    runners = []
-
-    for h in args.hosts:
-        runner = HostRunner(args.execution_id, h, args.port, args.username, password)
-        runners.append(runner)
+    for runner in runners:
         runner.connect()
-        print(f"Host {h} status = {runner.status()}")
+        print(f"Host {runner.host} status = {runner.status()}")
 
     return 0
 
 def run_clean(args):
-    if not args.hosts:
-        print("require at least one host when run in remote mode.", file=sys.stderr)
+    try:
+        runners = runners_from_args(args, args.execution_id)
+    except Exception as e:
+        print(e.msg, file=sys.stderr)
         return 1
-    if not args.username:
-        print("username required in remote mode.", file=sys.stderr)
-        return 1
 
-    password = (
-        os.getenv("SSH_SPECIAL_PASS")
-        or getpass.getpass("Please enter the password for these hosts: ")
-    )
-
-    runners = []
-
-    for h in args.hosts:
-        runner = HostRunner(args.execution_id, h, args.port, args.username, password)
-        runners.append(runner)
+    for runner in runners:
         runner.connect()
         runner.clean()
-        print(f"Host {h} cleaned.")
+        print(f"Host {runner.host} cleaned.")
     else:
         print(f"Cleaned execution from {len(runners)} hosts.")
 
