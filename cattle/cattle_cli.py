@@ -7,6 +7,7 @@ import pathlib
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import zipapp
 
@@ -93,11 +94,15 @@ class HostRunner:
                 f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
             )
 
+    def log(self):
+        exec_log = os.path.join(self.exec_dir, "exec.log")
+        _, cmd_out, _ = self.ssh_client.exec_command(f"cat {exec_log} || echo ''")
+        return cmd_out.read().decode().strip()
+
 def map_runners(fn, runners):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future_map = {executor.submit(fn, r): r for r in runners}
         for future in concurrent.futures.as_completed(future_map):
-            runner = future_map[future]
             future.result()
 
 def main() -> int:
@@ -141,6 +146,14 @@ def main() -> int:
     )
     parser_clean.set_defaults(func=run_clean)
     parser_clean.add_argument("execution_id")
+
+    parser_log = subparsers.add_parser(
+        "log",
+        help="View remote logs for an execution.",
+        parents=[hostinfo_parser],
+    )
+    parser_log.set_defaults(func=run_log)
+    parser_log.add_argument("execution_id")
 
     args = parser.parse_args()
     return args.func(args)
@@ -212,7 +225,6 @@ def run_exec_config(args):
 
     map_runners(transfer_and_exec, runners)
     print("Completed execution ID", execution_id)
-
     return 0
 
 def run_status(args):
@@ -227,7 +239,6 @@ def run_status(args):
         print(f"Host {runner.host} status = {runner.status()}")
 
     map_runners(status, runners)
-
     return 0
 
 def run_clean(args):
@@ -244,5 +255,23 @@ def run_clean(args):
 
     map_runners(clean, runners)
     print(f"Cleaned execution from {len(runners)} hosts.")
+    return 0
 
+def run_log(args):
+    try:
+        runners = runners_from_args(args, args.execution_id)
+    except Exception as e:
+        print(e.msg, file=sys.stderr)
+        return 1
+
+    lock = threading.Lock()
+
+    def clean(runner):
+        runner.connect()
+        log = runner.log()
+        with lock:
+            print(f"Host {runner.host} log:")
+            print(log)
+
+    map_runners(clean, runners)
     return 0
