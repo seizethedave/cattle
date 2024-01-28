@@ -143,7 +143,11 @@ def exec_config(args):
     log_file = os.path.join(exec_dir, "exec.log")
     status_file = os.path.join(exec_dir, "STATUS")
 
-    logging.basicConfig(filename=log_file, level=logging.INFO)
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s',
+    )
 
     rewrite_status(status_file, STATUS_PROGRESS)
 
