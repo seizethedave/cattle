@@ -53,7 +53,14 @@ def run_config(cfg):
     for i, step in enumerate(steps, start=1):
         try:
             logging.info(f"Running step {i} ({step.__class__.__name__})")
-            call_with_retry(step.run)
+            try:
+                should_run_fn = step.should_run
+            except AttributeError:
+                should_run_fn = lambda: True
+            if should_run_fn():
+                call_with_retry(step.run)
+            else:
+                logging.info("should run = False; skipping.")
         except Exception as e:
             logging.exception(f"aborting config at step {i} ({step.__class__.__name__})")
             raise
