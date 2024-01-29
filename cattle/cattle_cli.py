@@ -10,14 +10,16 @@ import sys
 import tarfile
 import tempfile
 import threading
-from typing import Union
 import time
+from typing import Dict, NamedTuple, Union
 import zipapp
 
 import paramiko
 import scp
 
-from . import cattle_remote
+class ExecResult(NamedTuple):
+    exit_code: int
+    result_vars: Dict[str, str] = None
 
 def make_archive(cfg_dir):
     def add_filter(item: tarfile.TarInfo):
@@ -90,8 +92,7 @@ class LocalHostConduit:
         shutil.copy(executable, exec_dir)
 
     def exec_command(self, cmd: str):
-        proc = subprocess.run(cmd, capture_output=True, shell=True)
-        proc.check_returncode()
+        proc = subprocess.run(cmd, capture_output=True, check=True, shell=True)
         return proc.stdout.decode().strip()
 
 class HostRunner:
@@ -99,9 +100,9 @@ class HostRunner:
     HostRunner handles all remote host communication: transferring files, running
     the remote cattle module, peeking at statuses, etc.
     """
-    def __init__(self, execution_id: str, hostdesc: str, conduit: Union[RemoteHostConduit, LocalHostConduit]):
+    def __init__(self, execution_id: str, exec_dir: str, hostdesc: str, conduit: Union[RemoteHostConduit, LocalHostConduit]):
         self.execution_id = execution_id
-        self.exec_dir = f"/var/run/cattle/{self.execution_id}"
+        self.exec_dir = exec_dir
         self.hostdesc = hostdesc
         self.conduit = conduit
 
@@ -140,11 +141,16 @@ def map_runners(fn, runners):
             future.result()
 
 def main() -> int:
-    hostinfo_parser = argparse.ArgumentParser(add_help=False)
-    hostinfo_parser.add_argument("-l", "--local", action="store_true")
-    hostinfo_parser.add_argument("-ho", "--host", dest="hosts", action="append")
-    hostinfo_parser.add_argument("-p", "--port", type=int, default=22)
-    hostinfo_parser.add_argument("-u", "--username", action="store")
+    return main_args(sys.argv[1:])
+
+def main_args_inner(argv) -> ExecResult:
+    common_parser = argparse.ArgumentParser(add_help=False)
+    common_parser.add_argument("-l", "--local", action="store_true")
+    common_parser.add_argument("-ho", "--host", dest="hosts", action="append")
+    common_parser.add_argument("-p", "--port", type=int, default=22)
+    common_parser.add_argument("-u", "--username", action="store")
+    common_parser.add_argument("-rr", "--run-root", action="store", type=str, default="/var/run/cattle",
+                               help="allows overriding where the Cattle run dir will be rooted on the target filesystem. (default /var/run/cattle)")
 
     parser = argparse.ArgumentParser(
         prog="cattle",
@@ -153,8 +159,8 @@ def main() -> int:
     subparsers = parser.add_subparsers()
     parser_exec = subparsers.add_parser(
         "exec",
-        help="Execute a Cattle config against remote hosts.",
-        parents=[hostinfo_parser],
+        help="Execute a Cattle config.",
+        parents=[common_parser],
     )
     parser_exec.set_defaults(func=run_exec_config)
     parser_exec.add_argument("config_dir")
@@ -168,7 +174,7 @@ def main() -> int:
     parser_status = subparsers.add_parser(
         "status",
         help="Enquire about the remote status of an execution.",
-        parents=[hostinfo_parser],
+        parents=[common_parser],
     )
     parser_status.set_defaults(func=run_status)
     parser_status.add_argument("execution_id")
@@ -176,7 +182,7 @@ def main() -> int:
     parser_clean = subparsers.add_parser(
         "clean",
         help="Clean remote resources associated with an execution.",
-        parents=[hostinfo_parser],
+        parents=[common_parser],
     )
     parser_clean.set_defaults(func=run_clean)
     parser_clean.add_argument("execution_id")
@@ -184,17 +190,23 @@ def main() -> int:
     parser_log = subparsers.add_parser(
         "log",
         help="View remote logs for an execution.",
-        parents=[hostinfo_parser],
+        parents=[common_parser],
     )
     parser_log.set_defaults(func=run_log)
     parser_log.add_argument("execution_id")
 
-    args = parser.parse_args()
-    return args.func(args)
+    args = parser.parse_args(argv)
+    res: ExecResult = args.func(args)
+    return res
+
+def main_args(argv) -> int:
+    return main_args_inner(argv).exit_code
 
 def runners_from_args(args, execution_id):
+    exec_dir = os.path.join(args.run_root, execution_id)
+
     if args.local:
-        return [HostRunner(execution_id, "[local]", LocalHostConduit())]
+        return [HostRunner(execution_id, exec_dir=exec_dir, hostdesc="[local]", conduit=LocalHostConduit())]
 
     if not args.hosts:
         raise Exception("require at least one host when run in remote mode.")
@@ -208,6 +220,7 @@ def runners_from_args(args, execution_id):
     return [
         HostRunner(
             execution_id=execution_id,
+            exec_dir=exec_dir,
             hostdesc=h,
             conduit=RemoteHostConduit(h, args.port, args.username, password),
         )
@@ -229,10 +242,10 @@ def run_exec_config(args):
         importable_module = importable_module[:-3]
 
     try:
-        config_module = importlib.import_module(importable_module)
+        importlib.import_module(importable_module)
     except ModuleNotFoundError as e:
         print(f"couldn't load config: {e}", file=sys.stderr)
-        return 1
+        return ExecResult(1)
 
     # Package up the customer configs and a zipapp package and transfer these to
     # the remote hosts.
@@ -244,7 +257,7 @@ def run_exec_config(args):
         runners = runners_from_args(args, execution_id)
     except Exception as e:
         print(e.msg, file=sys.stderr)
-        return 1
+        return ExecResult(1)
 
     archive = make_archive(config_abs)
     executable = make_executable()
@@ -259,27 +272,27 @@ def run_exec_config(args):
 
     map_runners(transfer_and_exec, runners)
     print("Completed execution ID", execution_id)
-    return 0
+    return ExecResult(0, {"execution_id": execution_id})
 
 def run_status(args):
     try:
         runners = runners_from_args(args, args.execution_id)
     except Exception as e:
         print(e.msg, file=sys.stderr)
-        return 1
+        return ExecResult(1)
 
     def status(runner):
         print(f"Host {runner.hostdesc} status = {runner.status()}")
 
     map_runners(status, runners)
-    return 0
+    return ExecResult(0)
 
 def run_clean(args):
     try:
         runners = runners_from_args(args, args.execution_id)
     except Exception as e:
         print(e.msg, file=sys.stderr)
-        return 1
+        return ExecResult(1)
 
     def clean(runner):
         runner.clean()
@@ -287,14 +300,14 @@ def run_clean(args):
 
     map_runners(clean, runners)
     print(f"Cleaned execution from {len(runners)} hosts.")
-    return 0
+    return ExecResult(0)
 
 def run_log(args):
     try:
         runners = runners_from_args(args, args.execution_id)
     except Exception as e:
         print(e.msg, file=sys.stderr)
-        return 1
+        return ExecResult(1)
 
     lock = threading.Lock()
 
@@ -306,4 +319,4 @@ def run_log(args):
             print(log)
 
     map_runners(clean, runners)
-    return 0
+    return ExecResult(0)
