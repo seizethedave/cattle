@@ -5,8 +5,6 @@ Facilities related to Linux system stuff. Packages, systemd services, etc.
 import subprocess
 from typing import List
 
-from cattle.facility.facility import Facility
-
 class InstallDebPackages:
     def __init__(self, packages: List[str]):
         if isinstance(packages, str):

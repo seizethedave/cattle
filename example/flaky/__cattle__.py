@@ -1,9 +1,8 @@
 """
 A flaky config that requires retries to eventually finish.
 """
-from cattle.facility.facility import Facility
 
-class FlakyAction(Facility):
+class FlakyAction:
     """
     FlakyAction requires multiple attempts to successfully complete.
     """

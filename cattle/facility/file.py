@@ -2,11 +2,8 @@ import filecmp
 import os
 import shutil
 
-from cattle.facility.facility import Facility
-
-class Chmod(Facility):
+class Chmod:
     def __init__(self, path, mode):
-        super(Facility).__init__()
         self.path = path
         self.mode = mode
 
@@ -19,9 +16,8 @@ class Chmod(Facility):
     def dry_run(self):
         return [f"chmod({self.path}, {oct(self.mode)})"]
 
-class Chown(Facility):
+class Chown:
     def __init__(self, path, owner_name=None, group_name=None):
-        super(Facility).__init__()
         self.path = path
         self.owner_name = owner_name
         self.group_name = group_name
@@ -35,9 +31,8 @@ class Chown(Facility):
     def dry_run(self):
         return [f"chown({self.path} user={self.owner_name}, group={self.group_name})"]
 
-class MakeDir(Facility):
+class MakeDir:
     def __init__(self, path):
-        super(Facility).__init__()
         self.path = path
 
     def should_run(self):
@@ -49,13 +44,12 @@ class MakeDir(Facility):
     def dry_run(self):
         return [f"make directory {self.path}"]
 
-class InstallFile(Facility):
+class InstallFile:
     def __init__(self, sourcefile, dest):
         """
         A file installation facility.
         >>> InstallFile("foo.txt", "/var/run/foo.txt")
         """
-        super(Facility).__init__()
         self.sourcepath = sourcefile
         self.destpath = dest
 
@@ -71,12 +65,11 @@ class InstallFile(Facility):
     def run(self):
         shutil.copyfile(self.sourcepath, self.destpath)
 
-    def dry_run(self) -> str:
+    def dry_run(self):
         return [f"install file {self.destpath}"]
 
-class Symlink(Facility):
+class Symlink:
     def __init__(self, source, dest):
-        super(Facility).__init__()
         self.source = source
         self.dest = dest
 
@@ -89,12 +82,11 @@ class Symlink(Facility):
         except FileExistsError:
             pass
 
-    def dry_run(self) -> str:
+    def dry_run(self):
         return [f"symlink {self.source} -> {self.dest}"]
 
-class Unlink(Facility):
+class Unlink:
     def __init__(self, path):
-        super(Facility).__init__()
         self.path = path
 
     def should_run(self):
@@ -106,5 +98,5 @@ class Unlink(Facility):
         except FileNotFoundError:
             pass
 
-    def dry_run(self) -> str:
+    def dry_run(self):
         return [f"unlink {self.path}"]
