@@ -4,10 +4,13 @@ import getpass
 import importlib
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
+from typing import Union
 import time
 import zipapp
 
@@ -36,31 +39,74 @@ def make_executable():
         )
         return t.name
 
-class HostRunner:
+class RemoteHostConduit:
     """
-    HostRunner handles all remote host communication: transferring files, running
-    the remote cattle module, peeking at statuses, etc.
+    Implements file transfers and command execution for a remote host.
     """
-    def __init__(self, execution_id, host, port, username, password):
-        self.execution_id = execution_id
-        self.exec_dir = f"/var/run/cattle/{self.execution_id}"
+    def __init__(self, host, port, username, password):
         self.host = host
         self.port = port
         self.username = username
         self.password = password
+        self.ssh_client = None
 
-    def connect(self):
+    def _connect(self):
+        """Establish a connected SSH client, if one isn't already connected."""
+        if self.ssh_client is not None:
+            return
         c = paramiko.SSHClient()
         c.load_system_host_keys()
         c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         c.connect(self.host, self.port, self.username, self.password)
         self.ssh_client = c
 
-    def transfer(self, archive, executable):
-        self.ssh_client.exec_command(f"mkdir -p {self.exec_dir}")
+    def transfer(self, archive, executable, exec_dir):
+        self._connect()
+        self.exec_command(f"mkdir -p {exec_dir}")
         with scp.SCPClient(self.ssh_client.get_transport()) as scp_client:
-            scp_client.put(archive, self.exec_dir)
-            scp_client.put(executable, self.exec_dir)
+            scp_client.put(archive, exec_dir)
+            scp_client.put(executable, exec_dir)
+
+    def exec_command(self, cmd: str):
+        """Execute command, make sure it's a success, and return stdout as a string."""
+        self._connect()
+        _, cmd_out, cmd_err = self.ssh_client.exec_command(cmd)
+        exit_code = cmd_out.channel.recv_exit_status()
+        if exit_code != 0:
+            raise Exception(
+                f"Execute failed with code {exit_code}: "
+                f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
+            )
+        return cmd_out.read().decode().strip()
+
+class LocalHostConduit:
+    """
+    A conduit for localhost. Rather than transferring and executing via SSH/SCP,
+    we do the local analogs.
+    """
+    def transfer(self, archive: str, executable: str, exec_dir: str):
+        self.exec_command(f"mkdir -p {exec_dir}")
+        shutil.copy(archive, exec_dir)
+        shutil.copy(executable, exec_dir)
+
+    def exec_command(self, cmd: str):
+        proc = subprocess.run(cmd, capture_output=True, shell=True)
+        proc.check_returncode()
+        return proc.stdout.decode().strip()
+
+class HostRunner:
+    """
+    HostRunner handles all remote host communication: transferring files, running
+    the remote cattle module, peeking at statuses, etc.
+    """
+    def __init__(self, execution_id: str, hostdesc: str, conduit: Union[RemoteHostConduit, LocalHostConduit]):
+        self.execution_id = execution_id
+        self.exec_dir = f"/var/run/cattle/{self.execution_id}"
+        self.hostdesc = hostdesc
+        self.conduit = conduit
+
+    def transfer(self, archive, executable):
+        self.conduit.transfer(archive, executable, self.exec_dir)
 
     def execute(self, archive, executable):
         archive_filename = os.path.basename(archive)
@@ -72,37 +118,19 @@ class HostRunner:
             f"python3 '{executable_filename}' init '{archive_filename}' && "
             f"python3 '{executable_filename}' exec '{config_filename}'"
         )
-        _, cmd_out, cmd_err = self.ssh_client.exec_command(
-            f"nohup bash -c \"{script}\""
-        )
-        exit_code = cmd_out.channel.recv_exit_status()
-        if exit_code != 0:
-            raise Exception(
-                f"Execute failed with code {exit_code}: "
-                f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
-            )
+        self.conduit.exec_command(f"nohup bash -c \"{script}\"")
 
     def status(self):
         exec_status = os.path.join(self.exec_dir, "STATUS")
-        _, cat_out, _ = self.ssh_client.exec_command(
-            f"cat {exec_status} || echo 'UNKNOWN'"
-        )
-        return cat_out.read().decode().strip()
+        return self.conduit.exec_command(f"cat {exec_status} || echo 'UNKNOWN'")
 
     def clean(self):
         assert self.exec_dir is not None and self.exec_dir != "/", "exec_dir should not be empty or dangerous-looking"
-        _, cmd_out, cmd_err = self.ssh_client.exec_command(f"rm -rf {self.exec_dir}")
-        exit_code = cmd_out.channel.recv_exit_status()
-        if exit_code != 0:
-            raise Exception(
-                f"Clean failed with code {exit_code}: "
-                f"stdout={cmd_out.read().decode()} stderr={cmd_err.read().decode()}"
-            )
+        self.conduit.exec_command(f"rm -rf {self.exec_dir}")
 
     def log(self):
         exec_log = os.path.join(self.exec_dir, "exec.log")
-        _, cmd_out, _ = self.ssh_client.exec_command(f"cat {exec_log} || echo ''")
-        return cmd_out.read().decode().strip()
+        return self.conduit.exec_command(f"cat {exec_log} || echo '<not found>'")
 
 def map_runners(fn, runners):
     """Call `fn` with each of the given runners in a thread pool."""
@@ -113,6 +141,7 @@ def map_runners(fn, runners):
 
 def main() -> int:
     hostinfo_parser = argparse.ArgumentParser(add_help=False)
+    hostinfo_parser.add_argument("-l", "--local", action="store_true")
     hostinfo_parser.add_argument("-ho", "--host", dest="hosts", action="append")
     hostinfo_parser.add_argument("-p", "--port", type=int, default=22)
     hostinfo_parser.add_argument("-u", "--username", action="store")
@@ -131,7 +160,6 @@ def main() -> int:
     parser_exec.add_argument("config_dir")
     parser_exec.add_argument("-m", "--config-module", default="__cattle__",
                             help="name of the config module. defaults to __cattle__.")
-    parser_exec.add_argument("-l", "--local", action="store_true")
     parser_exec.add_argument("-v", "--verbose", action="store_true")
     parser_exec.add_argument("-d", "--dry-run",
                             help="if set, prints the hypothetical rather than running anything",
@@ -165,17 +193,26 @@ def main() -> int:
     return args.func(args)
 
 def runners_from_args(args, execution_id):
+    if args.local:
+        return [HostRunner(execution_id, "[local]", LocalHostConduit())]
+
     if not args.hosts:
         raise Exception("require at least one host when run in remote mode.")
     if not args.username:
         raise Exception("username required in remote mode.")
-
     password = (
         os.getenv("SSH_SPECIAL_PASS")
         or getpass.getpass("Please enter the password for these hosts: ")
     )
 
-    return [HostRunner(execution_id, h, args.port, args.username, password) for h in args.hosts]
+    return [
+        HostRunner(
+            execution_id=execution_id,
+            hostdesc=h,
+            conduit=RemoteHostConduit(h, args.port, args.username, password),
+        )
+        for h in args.hosts
+    ]
 
 def run_exec_config(args):
     config_abs = os.path.abspath(args.config_dir.rstrip("/"))
@@ -197,14 +234,6 @@ def run_exec_config(args):
         print(f"couldn't load config: {e}", file=sys.stderr)
         return 1
 
-    if args.local:
-        if args.dry_run:
-            cattle_remote.dry_run_config(config_module)
-        else:
-            cattle_remote.run_config(config_module)
-        return 0
-
-    # Otherwise, we're in remote mode.
     # Package up the customer configs and a zipapp package and transfer these to
     # the remote hosts.
 
@@ -224,10 +253,9 @@ def run_exec_config(args):
         print("executable:", executable)
 
     def transfer_and_exec(runner):
-        runner.connect()
         runner.transfer(archive, executable)
         runner.execute(archive, executable)
-        print(f"Host {runner.host} finished with status '{runner.status()}'.")
+        print(f"Host {runner.hostdesc} finished with status '{runner.status()}'.")
 
     map_runners(transfer_and_exec, runners)
     print("Completed execution ID", execution_id)
@@ -241,8 +269,7 @@ def run_status(args):
         return 1
 
     def status(runner):
-        runner.connect()
-        print(f"Host {runner.host} status = {runner.status()}")
+        print(f"Host {runner.hostdesc} status = {runner.status()}")
 
     map_runners(status, runners)
     return 0
@@ -255,9 +282,8 @@ def run_clean(args):
         return 1
 
     def clean(runner):
-        runner.connect()
         runner.clean()
-        print(f"Host {runner.host} cleaned.")
+        print(f"Host {runner.hostdesc} cleaned.")
 
     map_runners(clean, runners)
     print(f"Cleaned execution from {len(runners)} hosts.")
@@ -273,10 +299,10 @@ def run_log(args):
     lock = threading.Lock()
 
     def clean(runner):
-        runner.connect()
         log = runner.log()
+        # (Don't interleave the logs from different hosts.)
         with lock:
-            print(f"Host {runner.host} log:")
+            print(f"Host {runner.hostdesc} log:")
             print(log)
 
     map_runners(clean, runners)
