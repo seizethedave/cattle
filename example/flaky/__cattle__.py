@@ -19,8 +19,8 @@ class FlakyAction:
         if self.remaining_attempts > 0:
             raise Exception("spurious failure in FlakyAction")
 
-    def dry_run(self):
-        return [f"flaky action (attempts={self.total_attempts})"]
+    def desc(self):
+        return f"flaky action (attempts={self.total_attempts})"
 
 steps = [
     FlakyAction(1),
