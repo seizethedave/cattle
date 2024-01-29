@@ -31,7 +31,7 @@ class RestartSystemdService:
     def run(self):
         # Unmask first, as the service could be masked and unstartable from
         # prior events.
-        subprocess.run(["systemctl", "unmask", self.service])
+        subprocess.run(["systemctl", "unmask", self.service], check=False)
         subprocess.run(["systemctl", "restart", self.service], check=True)
 
     def desc(self):
