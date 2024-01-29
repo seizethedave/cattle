@@ -67,6 +67,7 @@ class HostRunner:
         executable_filename = os.path.basename(executable)
         config_filename = os.path.join(self.exec_dir, "config")
         script = (
+            "set -euxo pipefail && "
             f"cd '{self.exec_dir}' && "
             f"python3 '{executable_filename}' init '{archive_filename}' && "
             f"python3 '{executable_filename}' exec '{config_filename}'"
@@ -103,6 +104,7 @@ class HostRunner:
         return cmd_out.read().decode().strip()
 
 def map_runners(fn, runners):
+    """Call `fn` with each of the given runners in a thread pool."""
     with concurrent.futures.ThreadPoolExecutor() as executor:
         future_map = {executor.submit(fn, r): r for r in runners}
         for future in concurrent.futures.as_completed(future_map):
