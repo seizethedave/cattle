@@ -66,10 +66,13 @@ class HostRunner:
         archive_filename = os.path.basename(archive)
         executable_filename = os.path.basename(executable)
         config_filename = os.path.join(self.exec_dir, "config")
+        script = (
+            f"cd '{self.exec_dir}' && "
+            f"python3 '{executable_filename}' init '{archive_filename}' && "
+            f"python3 '{executable_filename}' exec '{config_filename}'"
+        )
         _, cmd_out, cmd_err = self.ssh_client.exec_command(
-            f"cd {self.exec_dir} && "
-            f"python3 {executable_filename} init {archive_filename} && "
-            f"python3 {executable_filename} exec {config_filename}"
+            f"nohup bash -c \"{script}\""
         )
         exit_code = cmd_out.channel.recv_exit_status()
         if exit_code != 0:
