@@ -90,6 +90,7 @@ class HostRunner:
         return cat_out.read().decode().strip()
 
     def clean(self):
+        assert self.exec_dir is not None and self.exec_dir != "/", "exec_dir should not be empty or dangerous-looking"
         _, cmd_out, cmd_err = self.ssh_client.exec_command(f"rm -rf {self.exec_dir}")
         exit_code = cmd_out.channel.recv_exit_status()
         if exit_code != 0:
