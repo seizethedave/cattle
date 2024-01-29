@@ -38,8 +38,7 @@ def dry_run_config(cfg):
 
     for step in steps:
         logging.info(f"> {step.__class__.__name__}:")
-        for c in step.dry_run():
-            logging.info(f"   > {c}")
+        logging.info(f"   > {step.desc()}")
 
 def run_config(cfg):
     logging.info("running in real mode")
@@ -52,7 +51,7 @@ def run_config(cfg):
 
     for i, step in enumerate(steps, start=1):
         try:
-            logging.info(f"Running step {i} ({step.__class__.__name__})")
+            logging.info(f"Running step {i}: {step.__class__.__name__} ({step.desc()})")
             try:
                 should_run_fn = step.should_run
             except AttributeError:
@@ -155,6 +154,8 @@ def exec_config(args):
         level=logging.INFO,
         format='%(asctime)s %(levelname)s %(message)s',
     )
+
+    logging.info("running execution at path %s", exec_dir)
 
     rewrite_status(status_file, STATUS_PROGRESS)
 

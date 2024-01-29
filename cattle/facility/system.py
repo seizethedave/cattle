@@ -18,8 +18,8 @@ class InstallDebPackages:
         subprocess.run(["apt-get", "update", "-y"], check=True)
         subprocess.run(["apt-get", "install", "-y"] + self.packages, check=True)
 
-    def dry_run(self):
-        return [f"apt-get update && apt-get install -y {self.package_name}"]
+    def desc(self):
+        return f"apt-get update && apt-get install -y {' '.join(self.packages)}"
 
 class RestartSystemdService:
     def __init__(self, service):
@@ -34,8 +34,5 @@ class RestartSystemdService:
         subprocess.run(["systemctl", "unmask", self.service])
         subprocess.run(["systemctl", "restart", self.service], check=True)
 
-    def dry_run(self):
-        return [
-            f"systemctl unmask {self.service}",
-            f"systemctl restart {self.service}",
-        ]
+    def desc(self):
+        return f"systemctl unmask {self.service} && systemctl restart {self.service}"

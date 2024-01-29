@@ -13,8 +13,8 @@ class Chmod:
     def run(self):
         os.chmod(self.path, self.mode)
 
-    def dry_run(self):
-        return [f"chmod({self.path}, {oct(self.mode)})"]
+    def desc(self):
+        return f"chmod({self.path}, {oct(self.mode)})"
 
 class Chown:
     def __init__(self, path, owner_name=None, group_name=None):
@@ -28,8 +28,8 @@ class Chown:
     def run(self):
         shutil.chown(self.path, self.owner_name, self.group_name)
 
-    def dry_run(self):
-        return [f"chown({self.path} user={self.owner_name}, group={self.group_name})"]
+    def desc(self):
+        return f"chown({self.path} user={self.owner_name}, group={self.group_name})"
 
 class MakeDir:
     def __init__(self, path):
@@ -41,8 +41,8 @@ class MakeDir:
     def run(self):
         os.makedirs(self.path, exist_ok=True)
 
-    def dry_run(self):
-        return [f"make directory {self.path}"]
+    def desc(self):
+        return f"make directory {self.path}"
 
 class InstallFile:
     def __init__(self, sourcefile, dest):
@@ -65,8 +65,8 @@ class InstallFile:
     def run(self):
         shutil.copyfile(self.sourcepath, self.destpath)
 
-    def dry_run(self):
-        return [f"install file {self.destpath}"]
+    def desc(self):
+        return f"install file {self.destpath}"
 
 class Symlink:
     def __init__(self, source, dest):
@@ -82,8 +82,8 @@ class Symlink:
         except FileExistsError:
             pass
 
-    def dry_run(self):
-        return [f"symlink {self.source} -> {self.dest}"]
+    def desc(self):
+        return f"symlink {self.source} -> {self.dest}"
 
 class Unlink:
     def __init__(self, path):
@@ -98,5 +98,5 @@ class Unlink:
         except FileNotFoundError:
             pass
 
-    def dry_run(self):
-        return [f"unlink {self.path}"]
+    def desc(self):
+        return f"unlink {self.path}"
