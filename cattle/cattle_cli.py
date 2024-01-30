@@ -31,6 +31,20 @@ def make_archive(cfg_dir):
             tar.add(cfg_dir, arcname="config", recursive=True, filter=add_filter)
             return t.name
 
+def _make_zipapp_archive(**kwargs):
+    """
+    Work around Py3.6's zipapp.create_archive that didn't yet have a `filter`
+    param.
+    """
+    try:
+        zipapp.create_archive(filter="foo")
+    except TypeError:
+        try:
+            del kwargs["filter"]
+        except KeyError:
+            pass
+    zipapp.create_archive(**kwargs)
+
 def make_executable():
     this_file = pathlib.Path(__file__)
     exclude = {this_file.name, "test_cattle.py"}
@@ -41,8 +55,8 @@ def make_executable():
         )
 
     with tempfile.NamedTemporaryFile(prefix="cattle_runtime_", delete=False) as t:
-        zipapp.create_archive(
-            this_file.absolute().parent,
+        _make_zipapp_archive(
+            source=this_file.absolute().parent,
             target=t,
             main="cattle_remote:main",
             filter=should_include,
