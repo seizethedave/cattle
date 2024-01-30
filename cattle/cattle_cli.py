@@ -148,10 +148,19 @@ def map_runners(fn, runners):
         for future in concurrent.futures.as_completed(future_map):
             future.result()
 
+class ExecResult(NamedTuple):
+    exit_code: int
+    result_vars: Dict[str, str] = None
+
 def main() -> int:
     return main_args(sys.argv[1:])
 
+def main_args(argv) -> int:
+    "Executes the given args list and returns the exit code."
+    return main_args_inner(argv).exit_code
+
 def main_args_inner(argv) -> ExecResult:
+    "Like main_args but returns a slightly richer result."
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("-l", "--local", action="store_true")
     common_parser.add_argument("-ho", "--host", dest="hosts", action="append")
@@ -206,9 +215,6 @@ def main_args_inner(argv) -> ExecResult:
     args = parser.parse_args(argv)
     res: ExecResult = args.func(args)
     return res
-
-def main_args(argv) -> int:
-    return main_args_inner(argv).exit_code
 
 def runners_from_args(args, execution_id):
     exec_dir = os.path.join(args.run_root, execution_id)

@@ -1,6 +1,5 @@
-import subprocess
-import unittest
 import os
+import unittest
 
 from cattle.cattle_cli import main_args_inner
 
@@ -11,21 +10,20 @@ class TestCLI(unittest.TestCase):
         Definitely an integration test.
         """
         run_root = "/tmp/cattle-test-run"
+        test_config = os.path.join(os.path.dirname(os.path.dirname(__file__)), "example/flaky")
 
-        result = main_args_inner(["exec", os.path.abspath("../example/flaky"), "--local", "--run-root", run_root])
-        if result.exit_code != 0:
-            self.fail(f"cattle exec failed.")
+        proc = main_args_inner(["exec", test_config, "--local", "--run-root", run_root])
+        self.assertEqual(proc.exit_code, 0)
+        exec_id = proc.result_vars["execution_id"]
 
-        exec_id = result.result_vars["execution_id"]
+        proc = main_args_inner(["status", exec_id, "--local", "--run-root", run_root])
+        self.assertEqual(proc.exit_code, 0)
 
-        statusproc = main_args_inner(["status", exec_id, "--local", "--run-root", run_root])
-        self.assertEqual(statusproc.exit_code, 0)
+        proc = main_args_inner(["log", exec_id, "--local", "--run-root", run_root])
+        self.assertEqual(proc.exit_code, 0)
 
-        logproc = main_args_inner(["log", exec_id, "--local", "--run-root", run_root])
-        self.assertEqual(logproc.exit_code, 0)
-
-        cleanproc = main_args_inner(["clean", exec_id, "--local", "--run-root", run_root])
-        self.assertEqual(cleanproc.exit_code, 0)
+        proc = main_args_inner(["clean", exec_id, "--local", "--run-root", run_root])
+        self.assertEqual(proc.exit_code, 0)
 
 if __name__ == "__main__":
     unittest.main()
