@@ -114,7 +114,8 @@ class LocalHostConduit:
         shutil.copy(executable, exec_dir)
 
     def exec_command(self, cmd: str):
-        proc = subprocess.run(cmd, capture_output=True, check=True, shell=True)
+        proc = subprocess.run(cmd, check=True, shell=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return proc.stdout.decode().strip()
 
 class HostRunner:
