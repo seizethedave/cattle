@@ -17,13 +17,15 @@ import zipapp
 import paramiko
 import scp
 
-class ExecResult(NamedTuple):
-    exit_code: int
-    result_vars: Dict[str, str] = None
+EXCLUDE_FRAGMENTS = ["__pycache__", ".pytest_cache"]
 
 def make_archive(cfg_dir):
     def add_filter(item: tarfile.TarInfo):
-        return item if "__pycache__" not in item.name else None
+        for f in EXCLUDE_FRAGMENTS:
+            if f in item.name:
+                return None
+        return item
+
     with tempfile.NamedTemporaryFile(prefix="cattle_cfg_", delete=False) as t:
         with tarfile.open(mode="w:gz", fileobj=t) as tar:
             tar.add(cfg_dir, arcname="config", recursive=True, filter=add_filter)
@@ -31,13 +33,19 @@ def make_archive(cfg_dir):
 
 def make_executable():
     this_file = pathlib.Path(__file__)
+    exclude = {this_file.name, "test_cattle.py"}
+    def should_include(p: pathlib.Path) -> bool:
+        return (
+            all(f not in str(p.resolve()) for f in EXCLUDE_FRAGMENTS)
+            and str(p.name) not in exclude
+        )
+
     with tempfile.NamedTemporaryFile(prefix="cattle_runtime_", delete=False) as t:
         zipapp.create_archive(
             this_file.absolute().parent,
             target=t,
             main="cattle_remote:main",
-            # Leave out this script.
-            filter=lambda p: p != this_file.name,
+            filter=should_include,
         )
         return t.name
 
