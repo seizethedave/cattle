@@ -33,12 +33,9 @@ def make_archive(cfg_dir):
 
 def _make_zipapp_archive(**kwargs):
     """
-    Work around Py3.6's zipapp.create_archive that didn't yet have a `filter`
-    param.
+    zipapp.create_archive's `filter` param was added in Py3.7. Work around that.
     """
-    try:
-        zipapp.create_archive(filter="foo")
-    except TypeError:
+    if sys.version_info < (3, 7):
         try:
             del kwargs["filter"]
         except KeyError:
